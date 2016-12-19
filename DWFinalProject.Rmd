@@ -1,0 +1,287 @@
+---
+title: "Date Wrangling Final Project"
+author: "Harleena Malhotra"
+date: "December 19, 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+For the Data Wrangling Final Project, I analyzed the relationship between homicide rate and unemployment rate across the world. At first I was interested in analyzing the relationship between homicide rate and elections data in the United States. However, the further I researched, the more evident it became that the relationship did not exist.  Furthermore, the research started showing a demonstratable relationship between homicide rate and unemployment rate. Imagining that I was working for the United Nations and my job was to reduce the homicide rate all over the world, this would be my first step, analyzing the factors impacting the homicide rate, barring civil war in a country, unemployment rate would be one of the most impactful factors. 
+
+When trying to assess the relationship between unemployment rate and homicide rate, creating a linear model where homicide rate was the repsonse variable and unemployment rate was the predictor will be most informative. While working with this model, there were two main trends that were visible. The countries demonstrating the 1st trend showed that homicide rate was directly propotional to unemployment rate. In this trend, a decrease in unemployment rate showed a visible reduction in homicide rate. 
+
+The countries with the 2nd trend demontrated a static relationship.  For these countries unemployment rate didn't have much of an impact on homicide rate. This showed that in these countries there must be other factors like poverty rate, access to resources, or culture, that needed further research to get a better understanding.
+
+To accomplish the above, I leveraged my R skills to import the data, tidy the data, join various data frames, create informative graphs, plots, figures, and tables using packages like ggplot and choroplethr as well as using plotly and shiny to make the analysis and presentation interactive. 
+
+In order to proceed with this project, it was necessary to first load all the libraries I would need.
+```{r, message=FALSE, warning=FALSE}
+library(readr)
+library(readxl)
+library(choroplethr)
+library(choroplethrMaps)
+library(tidyverse)
+library(ggplot2)
+library(ggthemes)
+library(gridExtra)
+library(shiny)
+library(ggthemes)
+library(stringr)
+library(plotly)
+library(tidyr)
+library(reshape)
+library(modelr)
+library(purrr)
+library(broom)
+library(MASS)
+```
+
+
+## Tidying Data
+
+The source for the world unemployment data was: http://data.worldbank.org/indicator/SL.UEM.TOTL.ZS. After profiling the data, I realized that the first 4 rows in the csv file were not needed. Therefore, when the data was imported, the first 4 rows of the data frame were skipped.
+```{r, message=FALSE, warning=FALSE}
+WorldUnemployment <- read_csv("MessyData/WorldUnemploymentRateData.csv", skip = 4)
+```
+
+After further profiling the data, I noticed that some of the columns and rows were not relevant to the analysis. For the columns, it was easy to just remove the unnecessary ones. However, rows were relevant if there was non null value for at at least one year. To remove irrelevant rows, I created a loop to delete the rows that had NA for all years.
+```{r}
+## Remove unnecessary columns
+    WorldUnemployment <- WorldUnemployment[-c(3:35, 60:61)] 
+
+## Remove unnecessary rows 
+    i <- 1
+    while(i <= nrow(WorldUnemployment)) {
+      naCount <- 0
+      for(j in 3:ncol(WorldUnemployment)){
+      if(is.na(WorldUnemployment[i,j])){
+        naCount <- naCount + 1
+      }
+      }
+      ifelse(naCount == 24, WorldUnemployment <- WorldUnemployment[-i, ], i <- i+1)
+    }
+```
+
+In order to join the unemployment data frame with the homicide data frame by country and by year, it was necessary to rearrange the data frame from wide to long so that there is one row per country per year. 
+```{r}
+WorldUnemployment <- gather(WorldUnemployment, "Year", "UnemploymentRate", 3:26)
+```
+
+Next, the year column was changed from character type to integer type since the year is an integer. And lastly, the country column was renamed so that it would have a name that was easier to join with the world homicide data frame.
+```{r}
+## Change the years column from character type to integer type
+  WorldUnemployment$Year <- as.integer(WorldUnemployment$Year)
+
+## Rename country column 
+  colnames(WorldUnemployment)[1] <- c("Country")
+```
+
+The source for the world homicide data was: http://www.unodc.org/gsh/en/data.html. After profiling the data, I realized that first 6 rows in the csv file were not needed. Therefore, when the data was imported, the first 6 rows of the data frame were skipped. 
+```{r, message=FALSE, warning=FALSE}
+HomicideData <- read_csv("MessyData/HomicideData.csv", skip = 6)
+```
+
+After further profiling the data, I noticed that two of the columns were not relevant to the analysis and were removed. Next, some of the columns were missing names or had incorrect names, so I renamed those columns. 
+```{r}
+## Remove NA columns
+  HomicideData <- HomicideData[-c(4:5)] 
+
+## Rename columns
+  colnames(HomicideData)[1:4] <- c("Region", "SubRegion", "Country", "Indicator")
+```
+
+Since I only needed the homicide rate to complete my analysis and this data provided me with both the homicide rate and homicide count, I removed the homicide count and only kept the homicide rate.
+```{r}
+HomicideData <- subset(HomicideData, Indicator %in% c("Rate"))
+```
+
+In this data frame the counry name, region name, and sub-region name were only entered once and therefore many rows had empty country names, region names, and sub-region names. For this reason, I created a function that would be able to input the correct name based on the column that was selected.
+```{r}
+## Create the function
+    populate_prev_row_value <- function(x, y){
+      for(i in 2:nrow(x)){
+        if(is.na(x[i,y])){
+          x[i,y] <- x[i-1, y]
+        }
+      }
+      return(x)
+    }
+
+## Use the function to replace the missing values in the country, region, and sub-region columns
+  HomicideData <- populate_prev_row_value(HomicideData, 1)
+  HomicideData <- populate_prev_row_value(HomicideData, 2)
+  HomicideData <- populate_prev_row_value(HomicideData, 3)
+```
+
+In order to join the homicide data frame with the unemployment data frame by country and by year, it was necessary to rearrange the data frame from wide to long so that there would be a country column and a year column. 
+```{r}
+HomicideData <- gather(HomicideData, "Year", "HomicideRate", 5:17)
+```
+
+Next, both the homicide rate and the years columns were changed from character type to integer type since both the year and the rate are integers. 
+```{r}
+## Change the homicide rate column from character type to integer type
+  HomicideData$HomicideRate <- as.numeric(HomicideData$HomicideRate)
+
+## Change the years column from character type to integer type
+  HomicideData$Year <- as.integer(HomicideData$Year)
+```
+
+Then, the indicator column was deleted, since a column was created for the homicide rate. And lastly, all NA values were removed.
+```{r}
+## Delete indicator column 
+  HomicideData <- HomicideData[-c(4)]
+
+## Remove all NA values
+  HomicideData <- na.omit(HomicideData)    
+```
+Finally, both data frames were tidy and ready to go. 
+
+## Joining Data Frames
+
+Once both the data frames were tidy, it was time to join them. An inner join was used to join the two tables because I only wanted to keep the countries and years that had both unemployment rate and homicide rate. 
+```{r}
+TidyDF <- inner_join(WorldUnemployment, HomicideData, by = c("Country" = "Country", "Year" = "Year"))
+```
+
+A new columnn in the data frame was created for the ratio of homicide rate over unemployment rate. 
+```{r}
+TidyDF <- TidyDF %>% mutate(Ratio = HomicideRate/UnemploymentRate)
+```
+
+Next, a function was created to calculate the number of times each country appears in the data frame. A new column was created for this count. This count was important because later on, the slope for each country is calculated, and the slope can only be calculated if a country has at least two data points. Therefore, with the help of this function, all the countries that appeared less than two times were removed from the data frame.
+```{r}
+col_value_count <- function(x) {
+  nrow(subset(TidyDF, Country == x))
+}
+TidyDF <- TidyDF %>% 
+  mutate(CountryCount = map(Country, col_value_count))
+
+TidyDF <- subset(TidyDF, !CountryCount == 1)
+```
+
+Any unnecessary columns were deleted and the new data frame was saved as a csv file in the TidyData folder.
+```{r}
+## Remove unnecessary columns
+  TidyDF <- TidyDF[-c(9)]
+    
+## Create a csv file of the Tidy Data
+  write_csv(TidyDF, "TidyData/TidyDF.csv", na = "NA", append = FALSE)
+```
+
+Next, I used the nest package and the linear model that set homicide rate as the response and unemployment rate as the predictor, to find the slope. This slope was useful in telling us which trend the relationship followed. If the slope was above zero, the country followed the 1st trend that homicide rate was directly propotional to unemployment rate. If the slope was zero or below zero, the country followed the 2nd trend that demonstrated a static relationship.
+```{r}
+TidyDF_nested <- TidyDF[-c(5,6)]
+colnames(TidyDF_nested)[2] <- "CC"
+
+TidyDF_nested <- TidyDF_nested %>% 
+  group_by(Country,CC) %>% nest()
+
+get_lm <- function(listx){
+  lm(HomicideRate ~ UnemploymentRate, data = listx)
+}
+TidyDF_nested <- TidyDF_nested %>% 
+  mutate(lm_fit = map(data, get_lm))
+
+get_lmslope <- function(listz){
+  listz$coefficients[2]
+}
+TidyDF_nested <- TidyDF_nested %>% 
+  mutate(lm_slope = map(lm_fit, get_lmslope))
+
+
+TidyDF_nested2 <- TidyDF_nested[-c(4,3)]
+
+TidyDF_unnested <- TidyDF_nested2 %>% 
+  mutate(lm_slope2=as.numeric(lm_slope)) %>% 
+  unnest(lm_slope)
+
+TidyDF_unnested <- TidyDF_unnested[-c(2)]
+TidyDF_unnested <- TidyDF_unnested[-c(2)]
+```
+
+The new data frame with the country and slope was saved as a csv file in the TidyData folder.
+```{r}
+write_csv(TidyDF_unnested, "TidyData/TidyDF_unnested.csv", na = "NA", append = FALSE)
+```
+
+## Shiny App 
+
+Please refer to the ShinyApp.R file to run the interactive shiny app. This shiny app displays a choropleth map of the world showing the slope for each country. Use of the plotly package with this choropleth map allows you to hover over each country and get the country name, country code, and slope. The app also creates a plot of homicide data vs unemployment data for a specific country. The app includes a slider bar that allows you to choose the range of years and a drop down menu to select a country. 
+
+## Analysis 
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+plot1 <- ggplot(data = TidyDF, aes(x=Region, y=UnemploymentRate)) + geom_boxplot() + scale_y_continuous(limits = c(-10, 100)) + ylab("Unemployment Rate") + ggtitle("Box Plot of Unemployment Rate per Region") + theme_economist()
+plot2 <- ggplot(data = TidyDF, aes(x=Region, y=HomicideRate)) + geom_boxplot() + scale_y_continuous(limits = c(-10, 100)) + ylab("Homicide Rate") + ggtitle("Box Plot of Homicide Rate per Region") + theme_economist()
+grid.arrange(plot1, plot2, ncol = 1)
+```
+
+The box plot above can be useful when comparing unemployment rate per region with homicide rate per region. Most of the regions have a similar box plot for both the rates except for the Americas region. The homicide rate box plot for Americas is a lot more skewed to the right than the unemployment rate box plot. Although this box plot is useful to view so that we can get a better understanding of the distribution of our initial data, it does not give any information about the relationship between homicide rate and unemployment rate. 
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+BPlot1 <- ggplot(TidyDF, aes(x=Region, y=UnemploymentRate)) + geom_bar(stat = "identity") + scale_y_continuous(limits = c(0, 6000)) + ylab("Unemployment Rate") + ggtitle("Bar Graph of Unemployment Rate per Region") + theme_economist()
+BPlot2 <- ggplot(TidyDF, aes(x=Region, y=HomicideRate)) + geom_bar(stat = "identity") + scale_y_continuous(limits = c(0, 6000)) + ylab("Homicide Rate") + ggtitle("Bar Graph of Homicide Rate per Region") + theme_economist()
+grid.arrange(BPlot1, BPlot2, ncol = 1)
+```
+
+The bar graphs above show the regional differences in unemployment rate and homicide rate across the world. We must take into account that some of the regions have many more countries than other regions, while evaluating the disparity. The graph below provides a directional view of the relationship between homicide rate and unemployment rate. 
+
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+PointPlot2 <- ggplot(data = TidyDF, aes(x=UnemploymentRate, y=HomicideRate, color = Region)) + geom_point() + scale_y_continuous(limits = c(-10, 100)) + xlab("Unemployment Rate") + ylab("Homicide Rate") + ggtitle("Homicide Rate vs. Unemployment Rate") + theme_classic()
+ggplotly(PointPlot2)
+```
+
+This interactive plot above allows us to see that the homicide rate in Americas varies a lot more than the unemployment rate. For Asia, Europe, and Oceania although the unemployment rate varies, the homicide rate seems to be rather constant. For Africa, the homicide rate and unemployment rate seem to vary consistently. 
+
+```{r, echo=FALSE}
+Top10UR <- TidyDF %>%
+  arrange(desc(UnemploymentRate)) 
+head(Top10UR, n=10)
+```
+
+The tibble above provides the 10 countries with the highest unemployment rate. Namibia, Armenia, and Lesotho have the highest rates and appear in this tibble multiple times. 
+
+```{r, echo=FALSE}
+Top10HR <- TidyDF %>%
+  arrange(desc(HomicideRate))
+head(Top10HR, n=10)
+```
+
+The tibble above provides the 10 countries with the highest homicide rate. Honduras, El Salvador, and Columbia are the only 3 countries that appear in this top 10 list. 
+
+
+I then went on to find the top 10 and bottom 10 countries in regards to slope, which are displayed below. 
+
+```{r, echo=FALSE}
+Top10Slope <- TidyDF_unnested %>%
+  arrange(desc(lm_slope))
+head(Top10Slope, n=10)
+```
+
+
+```{r, echo=FALSE}
+Bottom10Slope <- TidyDF_unnested %>%
+  arrange(desc(-lm_slope))
+head(Bottom10Slope, n=10)
+```
+
+
+The country with the highest slope was Belarus and the country with the lowest slope was Cabo Verde. A slight decrease in unemployment rate in Belarus would greatly decreas the homicide rate. However, since Cabo Verde had such a low slope, other factors would have to be studied in order to reduce the homicide rate in that country. Below is a plot of Cabo Verde vs. Belarus. 
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+ggplot() + geom_line(data = filter(TidyDF, Country == "Cabo Verde"), mapping = aes(UnemploymentRate, HomicideRate, color = "blue")) + geom_line(data = filter(TidyDF, Country == "Belarus"), mapping = aes(UnemploymentRate, HomicideRate, color = "red")) + xlab("Unemployment Rate") + ylab("Homicide Rate") + scale_color_discrete(name = "Country", labels = c("Cabo Verde", "Belarus")) + ggtitle("Cabo Verde vs. Belarus") + scale_y_continuous(limits = c(0, 20)) + theme_bw()
+```
+
+
+## Conclusion
+
+This project was one of the best learning experiences, as it really provided me a perspective on how can I apply the learnings of statistical analysis and R programming to predict and resolve real world scenarios. These scenarios can range from world issues like crime, poverty, hunger, or can be related to the business world where I can leverage these learnings to create risk models, investment predictions or operatinal efficiencies. In addition, for this project, I was able to bring together all of the concepts taught each week into one final project. This project is a stepping stone towards my career goal of developing  machine learning applications that can help with many real life activities including predicting health outcomes, improving risk models, etc.
+
+For this Data Wrangling Final Project, I analyzed the relationship between homicide rate and unemployment rate across the world. Leveraging a linear model where homicide rate was the repsonse variable and unemployment rate was the predictor provided a simple and useful view of their relationship. While working with this model, there were two main trends that were visible. The countries demonstrating the 1st trend showed that homicide rate was directly propotional to unemployment rate. In this trend, a decrease in unemployment rate showed a visible reduction in homicide rate. The countries with the 2nd trend demontrated a static relationship.  For these countries unemployment rate didn't have much of an impact on homicide rate. This showed that in these countries there must be other factors like poverty rate, access to resources, or culture, that will need further research to get a better understanding.
+
+
